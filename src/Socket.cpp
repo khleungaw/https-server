@@ -6,6 +6,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <cstring>
 #include "../include/Socket.h"
 
 https::Socket::Socket(int PORT) {
@@ -18,19 +19,22 @@ https::Socket::Socket(int PORT) {
     //Create a socket
     socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD <= 0) {
-        throw std::runtime_error("Failed to create socket");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Port Creation Failed: " + error);
     }
 
     //Bind socket to port
     binding = bind(socketFD, (struct sockaddr *) &address, sizeof(address));
     if (binding < 0) {
-        throw std::runtime_error("Failed to bind socket");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Port Binding Failed: " + error);
     }
 
     //Listen for incoming connections
     listening = listen(this->socketFD, 32);
     if (listening < 0) {
-        throw std::runtime_error("Failed to listen on socket");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Port Listening Failed: " + error);
     }
 
     std::cout << "Socket created on port " << PORT << std::endl;

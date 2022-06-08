@@ -4,8 +4,11 @@
 
 #include <iostream>
 #include <unistd.h>
-#include <sys/epoll.h>
 #include <cstring>
+#include <sys/epoll.h>
+#include <sys/signalfd.h>
+#include <openssl/err.h>
+#include <csignal>
 #include "../include/Server.h"
 #include "Socket.h"
 
@@ -18,40 +21,81 @@ https::Server::Server(char *certFile, char *keyFile, Socket httpsSocket, Socket 
     SSL_load_error_strings();
     sslCtx = SSL_CTX_new(TLS_server_method());
     if (sslCtx == nullptr) {
-        throw std::runtime_error("Failed to create SSL context");
+        char buffer[256];
+        ERR_error_string(ERR_get_error(), buffer);
+        std::string error(buffer);
+        throw std::runtime_error("SSL Context Creation Failed: "+error);
     }
 
     //Load certificate
     if (SSL_CTX_use_certificate_file(sslCtx, certFile, SSL_FILETYPE_PEM) <= 0) {
-        throw std::runtime_error("Failed to load certificate");
+        char buffer[256];
+        ERR_error_string(ERR_get_error(), buffer);
+        std::string error(buffer);
+        throw std::runtime_error("Loading Certificate Failed: "+error);
+
     }
 
     //Load private key
     if (SSL_CTX_use_PrivateKey_file(sslCtx, keyFile, SSL_FILETYPE_PEM) <= 0) {
-        throw std::runtime_error("Failed to load private key");
+        char buffer[256];
+        ERR_error_string(ERR_get_error(), buffer);
+        std::string error(buffer);
+        throw std::runtime_error("Loading Private Key Failed: "+error);
+
     }
 
     //Check if private key matches certificate
-    if (!SSL_CTX_check_private_key(sslCtx)) {
-        throw std::runtime_error("Private key does not match certificate");
+    if (SSL_CTX_check_private_key(sslCtx) <= 0) {
+        char buffer[256];
+        ERR_error_string(ERR_get_error(), buffer);
+        std::string error(buffer);
+        throw std::runtime_error("Checking Private Key Failed: "+error);
     }
 
     //Setup epoll
     epollFD = epoll_create1(0);
     if (epollFD < 0) {
-        throw std::runtime_error("Failed to create epoll");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Epoll Creation Failed: " + error);
+    }
+
+    //Add SIGINT/SIGTERM to epoll
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) < 0) { //Block signals
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Changing Signal Mask Failed: " + error);
+    }
+
+    sigExitFD = signalfd(-1, &mask, 0);
+    if (sigExitFD < 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Creating SIGINT FD Failed: "+error);
+    }
+
+    struct epoll_event signalExitEvent{};
+    signalExitEvent.events = EPOLLIN;
+    signalExitEvent.data.fd = sigExitFD;
+    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, sigExitFD, &signalExitEvent) < 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Adding SIGINT to Epoll Failed: " + error);
     }
 
     //Add sockets to epoll
-    struct epoll_event epollEvent{};
-    epollEvent.events = EPOLLIN;
-    epollEvent.data.fd = httpsSocket.getSocketFD();
-    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, httpsSocket.getSocketFD(), &epollEvent) < 0) {
-        throw std::runtime_error("Failed to add https socket to epoll");
+    struct epoll_event socketEvent{};
+    socketEvent.events = EPOLLIN;
+    socketEvent.data.fd = httpsSocket.getSocketFD();
+    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, httpsSocket.getSocketFD(), &socketEvent) < 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Adding HTTPS Socket to Epoll Failed: " + error);
     }
-    epollEvent.data.fd = httpSocket.getSocketFD();
-    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, httpSocket.getSocketFD(), &epollEvent) < 0) {
-        throw std::runtime_error("Failed to add http socket to epoll");
+    socketEvent.data.fd = httpSocket.getSocketFD();
+    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, httpSocket.getSocketFD(), &socketEvent) < 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Adding HTTP Socket to Epoll Failed: " + error);
     }
 }
 
@@ -68,7 +112,8 @@ void https::Server::handleEpochEvents() {
     struct epoll_event epollEvent{};
     int epollResult = epoll_wait(epollFD, &epollEvent, 1, -1);
     if (epollResult < 0) {
-        throw std::runtime_error("Failed to wait on epoll");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Waiting on Epoll Failed: " + error);
     }
 
     //Check if client is coming from https port
@@ -76,9 +121,18 @@ void https::Server::handleEpochEvents() {
     if (incomingSocketFD == httpsSocket.getSocketFD()) {
         std::cout << "Client connected on HTTPS port" << std::endl;
         handleHTTPSRequest(incomingSocketFD);
+        return;
     } else if (incomingSocketFD == httpSocket.getSocketFD()) {
         std::cout << "Client connected on HTTP port" << std::endl;
         redirectToHTTPS(incomingSocketFD);
+        return;
+    }
+
+    //Check if event is from signal
+    if (epollEvent.data.fd == sigExitFD) {
+        std::cout << "SIGINT or SIGTERM received. Shutting down." << std::endl;
+        end();
+        exit(0);
     }
 }
 
@@ -90,7 +144,8 @@ void https::Server::redirectToHTTPS(int fd) {
     //Accept client connection
     int connection = accept(fd, (struct sockaddr *) &clientAddress, &clientAddressLength);
     if (connection < 0) {
-        throw std::runtime_error("Failed to accept client connection");
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Accepting Connection Failed: " + error);
     }
 
     std::cout << "Accepted client connection" << std::endl;
@@ -98,8 +153,9 @@ void https::Server::redirectToHTTPS(int fd) {
     //Get https port
     int httpsPort = httpsSocket.getPort();
     //Redirects client to https port
+    std::string domain = std::getenv("DOMAIN") ? getenv("DOMAIN") : "localhost";
     char buffer[1024];
-    std::string response = "HTTP/1.1 301 Moved Permanently\r\nLocation: https://localhost:" + std::to_string(httpsPort) + "/\r\n\r\n";
+    std::string response = "HTTP/1.1 301 Moved Permanently\r\nLocation: https://"+ domain + ":" + std::to_string(httpsPort) + "/\r\n\r\n";
     strcpy(buffer, response.c_str());
     send(connection, buffer, strlen(buffer), 0);
 
@@ -114,8 +170,9 @@ void https::Server::handleHTTPSRequest(int fd) {
 
     //Accept client connection
     int connection = accept(fd, (struct sockaddr *) &clientAddress, &clientAddressLength);
-    if (connection <= 0) {
-        throw std::runtime_error("Failed to accept client");
+    if (connection < 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Accepting Connection Failed: " + error);
     }
 
     std::cout << "Accepted client connection" << std::endl;
@@ -123,31 +180,47 @@ void https::Server::handleHTTPSRequest(int fd) {
     //Create new ssl state
     SSL *ssl = SSL_new(sslCtx);
     if (ssl == nullptr) {
-        throw std::runtime_error("Failed to create SSL state");
+        char buffer[256];
+        ERR_error_string(ERR_get_error(), buffer);
+        std::string error(buffer);
+        throw std::runtime_error("Creating SSL State Failed: "+error);
     }
 
     //Copy client to SSL
     SSL_set_fd(ssl, connection);
 
     //Handshake
-    if (SSL_accept(ssl) <= 0) {
-        throw std::runtime_error("Failed to complete handshake");
+    int handShakeResult = SSL_accept(ssl);
+    if (handShakeResult <= 0) { //Unsuccessful handshake
+        int sslError = SSL_get_error(ssl, handShakeResult);
+        std::cout << "Handshake Failed: " << std::to_string(sslError) << std::endl;
+    } else {
+        std::cout << "Handshake Successful" << std::endl;
     }
 
     //Read client request
-    char buffer[1024];
-    int bytesRead = SSL_read(ssl, buffer, sizeof(buffer));
+    char requestBuffer[2048];
+    int bytesRead = SSL_read(ssl, requestBuffer, sizeof(requestBuffer));
     if (bytesRead <= 0) {
-        throw std::runtime_error("Failed to read client request");
+        int sslError = SSL_get_error(ssl, handShakeResult);
+        if (sslError == SSL_ERROR_SYSCALL) {
+            std::string error = std::strerror(errno);
+            throw std::runtime_error("Reading Client Request Failed: " + error);
+        } else if (sslError == SSL_ERROR_ZERO_RETURN) {
+            std::cout << "Client disconnected" << std::endl;
+        } else {
+            throw std::runtime_error("Reading Client Request Failed: " + std::to_string(sslError));
+        }
     }
 
     //Print request
-    std::cout << "Request: " << buffer << std::endl;
+    std::cout << "Request: " << requestBuffer << std::endl;
 
     //Send response
     SSL_write(ssl, "HTTP/1.1 200 OK\r\n\r\nHello World!", 27);
 
     //Close connection
     SSL_shutdown(ssl);
-    close(connection);}
+    close(connection);
+}
 

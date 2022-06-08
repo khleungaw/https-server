@@ -12,6 +12,7 @@ namespace https {
     class Server {
     private:
         int epollFD;
+        int sigExitFD;
         Socket httpsSocket;
         Socket httpSocket;
         SSL_CTX *sslCtx;

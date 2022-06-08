@@ -1,8 +1,6 @@
-#include <sys/socket.h>
 #include <openssl/ssl.h>
 #include <iostream>
 #include "../include/Server.h"
-
 
 int main() {
     //Initialize variables
