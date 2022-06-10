@@ -4,11 +4,10 @@ project(https_server)
 find_package(OpenSSL REQUIRED)
 
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
 
 set(SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/Server.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/Socket.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
 )
 
 add_executable(https_server src/main.cpp)
@@ -20,6 +19,7 @@ include_directories(https_server
 add_library(https STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Server.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/Socket.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/utils.cpp
 )
 
 target_link_libraries(https_server

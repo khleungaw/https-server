@@ -3,10 +3,11 @@
 //
 
 #include <iostream>
+#include <cstring>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <cstring>
 #include "../include/Socket.h"
 
 https::Socket::Socket(int PORT) {
@@ -19,6 +20,13 @@ https::Socket::Socket(int PORT) {
     //Create a socket
     socketFD = socket(AF_INET, SOCK_STREAM, 0);
     if (socketFD <= 0) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Port Creation Failed: " + error);
+    }
+
+    //Set socket to non-blocking
+    int flags = fcntl(socketFD, F_GETFL, 0);
+    if (flags == -1) {
         std::string error = std::strerror(errno);
         throw std::runtime_error("Port Creation Failed: " + error);
     }
