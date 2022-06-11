@@ -39,8 +39,6 @@ std::string https::generateResponse(const std::string &html) {
     httpResponse += "\r\n";
     httpResponse += html;
 
-    char *buffer = new char[httpResponse.length()];
-    memcpy(buffer, httpResponse.c_str(), httpResponse.length());
-    return buffer;
+    return httpResponse;
 }
 

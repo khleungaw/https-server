@@ -11,28 +11,37 @@
 #include "Socket.h"
 
 namespace https {
-    constexpr size_t bufferSize = 4096;
+    constexpr size_t bufferSize = 2048;
 
     class Server {
     private:
-        int epollFD;
+        int socketEpollFD;
+        int signalEpollFD;
         int sigExitFD;
         int sigPipeFD;
         Socket httpsSocket;
         Socket httpSocket;
         SSL_CTX *sslCtx;
-        std::vector<int> connections;
+        int* httpsEpollFDs;
+        int httpEpollFD;
         std::string htmlText;
     public:
-        Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath);
-        void handleEpochEvents();
+        Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int threadCount);
+        static SSL_CTX* setupSSL(char *certFile, char *keyFile );
+        static int setupSocketEpoll(https::Socket httpsSocket, https::Socket httpSocket);
+        static int setupSignalEpoll(int sigExitFD, int sigPipeFD);
+        static int createWorkerEpoll();
+        static int setupExitFD();
+        static int setupPipeFD();
+        void handleHTTPS(int epollFD);
+        void handleHTTP(int epollFD);
+        void handleSignalEvents();
+        void handleSocketEvents(int threadCount);
+        void start(int threadCount);
         void end();
-        void redirectToHTTPS(int fd);
-        void handleHTTPSRequest(int fd);
-        void acceptConnection(int fd, bool isHTTPS);
-        std::string sslRead(SSL *ssl, int connectionFD) const;
         SSL* makeSSLConnection(int fd);
         void loadHTML(const std::string &path);
+        static void rearmEpoll(int epollFD, int fd);
     };
 }
 
