@@ -6,9 +6,11 @@
 #define HTTPS_SERVER_SERVER_H
 
 #include <vector>
+#include <map>
 #include <openssl/ssl.h>
 #include <sys/epoll.h>
 #include "Socket.h"
+#include "utils.h"
 
 namespace https {
     constexpr size_t bufferSize = 2048;
@@ -25,6 +27,7 @@ namespace https {
         int* httpsEpollFDs;
         int httpEpollFD;
         std::string htmlText;
+        std::map<int, SSL*> *workersConnections;
     public:
         Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int threadCount);
         static SSL_CTX* setupSSL(char *certFile, char *keyFile );
@@ -33,7 +36,9 @@ namespace https {
         static int createWorkerEpoll();
         static int setupExitFD();
         static int setupPipeFD();
-        void handleHTTPS(int epollFD);
+        void handleHTTPS(int epollFD, int workerID);
+        void processRead(int epollFD, SSL *ssl, int workerID);
+        void processWrite(SSL *ssl, const HttpRequest& request, int workerID);
         void handleHTTP(int epollFD);
         void handleSignalEvents();
         void handleSocketEvents(int threadCount);
@@ -41,6 +46,7 @@ namespace https {
         void end();
         SSL* makeSSLConnection(int fd);
         void loadHTML(const std::string &path);
+        void closeConnection(SSL *ssl, int workerID);
         static void rearmEpoll(int epollFD, int fd);
     };
 }

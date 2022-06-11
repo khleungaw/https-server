@@ -24,12 +24,12 @@ https::Socket::Socket(int PORT) {
         throw std::runtime_error("Port Creation Failed: " + error);
     }
 
-    /*//Set socket to non-blocking
-    int flags = fcntl(socketFD, F_GETFL, 0);
+    //Set socket to non-blocking
+    int flags = fcntl(socketFD, F_SETFL, O_NONBLOCK);
     if (flags == -1) {
         std::string error = std::strerror(errno);
         throw std::runtime_error("Setting Non-blocking failed: " + error);
-    }*/
+    }
 
     //Set to KEEPALIVE
     int keepAlive = 1;
@@ -45,13 +45,7 @@ https::Socket::Socket(int PORT) {
         throw std::runtime_error("Port Binding Failed: " + error);
     }
 
-    /*//Set to non-blocking
-    if (fcntl(socketFD, F_SETFL, flags | O_NONBLOCK) == -1) {
-        std::string error = std::strerror(errno);
-        throw std::runtime_error("Setting Non-blocking failed: " + error);
-    }*/
-
-    //Listen for incoming httpsEpollFDs
+    //Listen for incoming messages
     listening = listen(this->socketFD, 32);
     if (listening < 0) {
         std::string error = std::strerror(errno);
