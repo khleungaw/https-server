@@ -17,6 +17,7 @@ namespace https {
 
     class Server {
     private:
+        int fdCount = 0;
         int socketEpollFD;
         int signalEpollFD;
         int sigExitFD;

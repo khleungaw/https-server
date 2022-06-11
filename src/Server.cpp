@@ -95,9 +95,6 @@ void https::Server::handleHTTPS(int epollFD, int workerID) {
                 std::cout << (epollEvents[i].events & EPOLLOUT) << std::endl;
             }
         }
-
-
-
     }
 }
 
@@ -419,9 +416,10 @@ void https::Server::handleSocketEvents(int threadCount) {
         int socketFD = epollEvent.data.fd;
         int acceptedFD = accept(socketFD, (struct sockaddr *) &clientAddress, &clientAddressLength);
         if (acceptedFD < 0) {
-            std::string error = std::strerror(errno);
-            throw std::runtime_error("Accepting Client Connection Failed: " + error);
+            std::cout << "Accept Failed: " << std::strerror(errno) << std::endl;
+            continue;
         }
+        fdCount++;
 
         //Set non-blocking
         int flags = fcntl(acceptedFD, F_SETFL, O_NONBLOCK);
@@ -435,12 +433,6 @@ void https::Server::handleSocketEvents(int threadCount) {
 
         if (isHTTPS) {
             std::cout << "--------------------HTTPS Connection--------------------" << std::endl;
-            //Do TLS handshake
-            SSL* ssl = makeSSLConnection(acceptedFD);
-
-            //Add ssl to workersConnections
-            workersConnections[workerIterator][acceptedFD] = ssl;
-
             //Distribute client connection to worker thread
             struct epoll_event workerEvent{};
             workerEvent.events = EPOLLIN | EPOLLET;
@@ -580,6 +572,7 @@ void https::Server::closeConnection(SSL *ssl, int workerID) {
     SSL_free(ssl);
     //Close socket
     close(fd);
+    fdCount--;
 
     std::cout << "-------------------Closing Connection-------------------" << std::endl;
 }
