@@ -1,6 +1,6 @@
 #include <openssl/ssl.h>
 #include <iostream>
-#include "../include/Server.h"
+#include "../include/server.h"
 
 int main() {
     //Initialize variables

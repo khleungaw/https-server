@@ -8,7 +8,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include "../include/Socket.h"
+#include "../include/socket.h"
 
 https::Socket::Socket(int PORT) {
     port = PORT;
@@ -25,11 +25,7 @@ https::Socket::Socket(int PORT) {
     }
 
     //Set socket to non-blocking
-    int flags = fcntl(socketFD, F_SETFL, O_NONBLOCK);
-    if (flags == -1) {
-        std::string error = std::strerror(errno);
-        throw std::runtime_error("Setting Non-blocking failed: " + error);
-    }
+    setNonBlocking(socketFD);
 
     //Set to KEEPALIVE
     int keepAlive = 1;
@@ -66,4 +62,17 @@ int https::Socket::getSocketFD() const {
 
 int https::Socket::getPort() const {
     return port;
+}
+
+void https::Socket::setNonBlocking(int fd) {
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags == -1) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Socket Flags Failed: " + error);
+    }
+    flags |= O_NONBLOCK;
+    if (fcntl(fd, F_SETFL, flags) == -1) {
+        std::string error = std::strerror(errno);
+        throw std::runtime_error("Socket Flags Failed: " + error);
+    }
 }

@@ -9,8 +9,8 @@
 #include <map>
 #include <openssl/ssl.h>
 #include <sys/epoll.h>
-#include "Socket.h"
-#include "utils.h"
+#include "socket.h"
+#include "message.h"
 
 namespace https {
     constexpr size_t bufferSize = 2048;
@@ -18,8 +18,7 @@ namespace https {
     class Server {
     private:
         int fdCount = 0;
-        int socketEpollFD;
-        int signalEpollFD;
+        int listenerEpollFD;
         int sigExitFD;
         int sigPipeFD;
         Socket httpsSocket;
@@ -28,27 +27,28 @@ namespace https {
         int* httpsEpollFDs;
         int httpEpollFD;
         std::string htmlText;
-        std::map<int, SSL*> *workersConnections;
+        std::map<int, SSL*> *connectionsSSLs;
+        std::map<int, https::HttpRequest*> *connectionsRequests;
     public:
         Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int threadCount);
-        static SSL_CTX* setupSSL(char *certFile, char *keyFile );
-        static int setupSocketEpoll(https::Socket httpsSocket, https::Socket httpSocket);
-        static int setupSignalEpoll(int sigExitFD, int sigPipeFD);
-        static int createWorkerEpoll();
-        static int setupExitFD();
-        static int setupPipeFD();
         void handleHTTPS(int epollFD, int workerID);
-        void processRead(int epollFD, SSL *ssl, int workerID);
-        void processWrite(SSL *ssl, const HttpRequest& request, int workerID);
         void handleHTTP(int epollFD);
-        void handleSignalEvents();
-        void handleSocketEvents(int threadCount);
+        static https::HttpRequest *processRead(SSL *ssl);
+        void processWrite(SSL *ssl, https::HttpRequest *request);
+        void processSigExit();
+        void handleListenerEvents(int threadCount);
         void start(int threadCount);
         void end();
         SSL* makeSSLConnection(int fd);
         void loadHTML(const std::string &path);
-        void closeConnection(SSL *ssl, int workerID);
-        static void rearmEpoll(int epollFD, int fd);
+        void closeConnection(SSL *ssl, int fd, int workerID);
+
+        static SSL_CTX* setupSSL(char *certFile, char *keyFile );
+        static void setupSocketEpoll(int epollFD, https::Socket httpsSocket, https::Socket httpSocket);
+        static void setupSignalEpoll(int epollFD, int sigExitFD, int sigPipeFD);
+        static int createWorkerEpoll();
+        static int setupExitFD();
+        static int setupPipeFD();
     };
 }
 

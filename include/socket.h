@@ -17,6 +17,7 @@ namespace https {
         int port;
     public:
         explicit Socket(int PORT);
+        static void setNonBlocking(int fd);
         int getSocketFD() const;
         int getPort() const;
         void end() const;
