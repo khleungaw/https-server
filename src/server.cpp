@@ -78,7 +78,6 @@ void https::Server::handleHTTPS(int epollFD, int workerID) {
 
         for (int i = 0; i < waitResult; i++) {
             int fd = epollEvents[i].data.fd;
-            std::cout << "Worker " << workerID << ": "<<"EPOLLIN: "<< (epollEvents[i].events & EPOLLIN) << " , EPOLLOUT:" << (epollEvents[i].events & EPOLLOUT) << std::endl;
 
             if (epollEvents[i].events & EPOLLIN) { //EPOLLIN
                 SSL *ssl;
@@ -97,7 +96,6 @@ void https::Server::handleHTTPS(int epollFD, int workerID) {
                 } else {
                     //Get SSL Connection
                     ssl = connectionsSSLs[workerID][fd];
-                    std::cout << "AM I HERE" << std::endl;
                 }
                 //Read immediately
                 connectionsRequests[workerID][fd] = processRead(ssl);
@@ -176,7 +174,7 @@ void https::Server::handleHTTP(int epollFD) {
         std::cout << req << std::endl;
 
         //Prepare response
-        std::string domain = std::getenv("DOMAIN") ? getenv("DOMAIN") : "172.18.201.161";
+        std::string domain = std::getenv("DOMAIN") ? getenv("DOMAIN") : "localhost";
         char resBuffer[1024];
         std::string response =
                 "HTTP/1.1 301 Moved Permanently\r\n"
