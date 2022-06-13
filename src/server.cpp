@@ -99,8 +99,6 @@ void https::Server::handleHTTPS(int epollFD) {
                             connection->state = 1;
                             //Read immediately
                             processRead(&connection);
-                            //Update connection state
-                            connection->state = 2;
                         } else preemptClose(connection->ssl, connection->fd);
                         break;
                     case 1: //Waiting for read
