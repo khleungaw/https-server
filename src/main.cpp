@@ -14,11 +14,11 @@ int main() {
     char *keyFile = const_cast<char *>(keyFilePath.c_str());
 
     //Create a server
-    https::Server server(certFile, keyFile, https::Socket(httpsPort), https::Socket(httpPort), htmlFilePath, 5);
+    https::Server server(certFile, keyFile, https::Socket(httpsPort), https::Socket(httpPort), htmlFilePath, 2, 1);
 
     //Initialize OpenSSL
     SSL_library_init();
 
     //Starts server
-    server.start(5);
+    server.start();
 }

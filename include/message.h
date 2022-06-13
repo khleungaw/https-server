@@ -9,14 +9,8 @@
 
 
 namespace https {
-    struct HttpRequest {
-        std::string method;
-        std::string path;
-        std::string version;
-        explicit HttpRequest(const std::string& req);
-    };
-
     std::string generateResponse(const std::string &html);
+    char *generateRedirect();
 }
 
 #endif //HTTPS_SERVER_MESSAGE_H

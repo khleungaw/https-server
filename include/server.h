@@ -11,37 +11,38 @@
 #include <sys/epoll.h>
 #include "socket.h"
 #include "message.h"
+#include "connection.h"
 
 namespace https {
     constexpr size_t bufferSize = 2048;
 
     class Server {
     private:
-        int fdCount = 0;
         int listenerEpollFD;
         int sigExitFD;
         int sigPipeFD;
         Socket httpsSocket;
         Socket httpSocket;
         SSL_CTX *sslCtx;
+        int httpsThreadCount;
+        int httpThreadCount;
         int* httpsEpollFDs;
-        int httpEpollFD;
+        int* httpEpollFDs;
         std::string htmlText;
-        std::map<int, SSL*> *connectionsSSLs;
-        std::map<int, https::HttpRequest*> *connectionsRequests;
     public:
-        Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int threadCount);
-        void handleHTTPS(int epollFD, int workerID);
-        void handleHTTP(int epollFD);
-        static https::HttpRequest *processRead(SSL *ssl);
-        void processWrite(SSL *ssl, https::HttpRequest *request);
+        Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int httpsThreadCount, int httpThreadCount);
+        void handleHTTPS(int epollFD);
+        static void handleHTTP(int epollFD);
+        static void processRead(https::Connection **connection);
+        void processWrite(https::Connection **connection);
         void processSigExit();
-        void handleListenerEvents(int threadCount);
-        void start(int threadCount);
+        void handleListenerEvents();
+        void start();
         void end();
         SSL* makeSSLConnection(int fd);
         void loadHTML(const std::string &path);
-        void closeConnection(SSL *ssl, int fd, int workerID);
+        static void closeConnection(https::Connection **connection);
+        static void preemptClose(SSL *ssl, int fd);
 
         static SSL_CTX* setupSSL(char *certFile, char *keyFile );
         static void setupSocketEpoll(int epollFD, https::Socket httpsSocket, https::Socket httpSocket);
