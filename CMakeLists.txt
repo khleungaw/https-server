@@ -18,7 +18,6 @@ include_directories(https_server
 
 add_library(https STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/server.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/socket.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/message.cpp
 )
 

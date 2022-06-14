@@ -18,12 +18,12 @@ std::string https::generateResponse(const std::string &html) {
 char* https::generateRedirect() {
     auto buffer = new char[128];
     strcat(buffer, "HTTP/1.1 301 Moved Permanently\r\n");
+    strcat(buffer, "Connection: close\r\n");
     strcat(buffer, "Location: https://");
     strcat(buffer, std::getenv("DOMAIN") ? getenv("DOMAIN") : "localhost");
     strcat(buffer, ":");
     strcat(buffer, std::getenv("HTTPS_PORT") ? getenv("HTTPS_PORT") : "4430");
-    strcat(buffer, "\r\n");
-    strcat(buffer, "\r\n");
+    strcat(buffer, "\r\n\r\n");
 
     return buffer;
 }

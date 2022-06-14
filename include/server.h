@@ -14,42 +14,38 @@
 #include "connection.h"
 
 namespace https {
-    constexpr size_t bufferSize = 2048;
+    constexpr size_t kBufferSize = 2048;
 
     class Server {
     private:
-        int listenerEpollFD;
+        Socket *httpsSocket;
+        Socket *httpSocket;
+        SSL_CTX *sslCtx;
         int sigExitFD;
         int sigPipeFD;
-        Socket httpsSocket;
-        Socket httpSocket;
-        SSL_CTX *sslCtx;
-        int httpsThreadCount;
-        int httpThreadCount;
-        int* httpsEpollFDs;
-        int* httpEpollFDs;
+        int epollFD;
         std::string htmlText;
     public:
-        Server(char *certFile, char *keyFile, Socket httpsSocket, Socket httpSocket, const std::string& htmlFilePath, int httpsThreadCount, int httpThreadCount);
-        void handleHTTPS(int epollFD);
-        static void handleHTTP(int epollFD);
-        static void processRead(https::Connection **connection);
-        void processWrite(https::Connection **connection);
-        void processSigExit();
-        void handleListenerEvents();
-        void start();
-        void end();
-        SSL* makeSSLConnection(int fd);
-        void loadHTML(const std::string &path);
-        static void closeConnection(https::Connection **connection);
-        static void preemptClose(SSL *ssl, int fd);
-
+        Server(char *certFile, char *keyFile, int httpsPort, int httpPort, const std::string& htmlFilePath);
         static SSL_CTX* setupSSL(char *certFile, char *keyFile );
-        static void setupSocketEpoll(int epollFD, https::Socket httpsSocket, https::Socket httpSocket);
-        static void setupSignalEpoll(int epollFD, int sigExitFD, int sigPipeFD);
-        static int createWorkerEpoll();
         static int setupExitFD();
         static int setupPipeFD();
+        void setupSocketEpoll();
+        void setupSignalEpoll() const;
+
+        void handleEvents();
+        void processSigExit();
+        void processSocket(int fd);
+        void processHTTPS(epoll_event event);
+        void processHTTP(epoll_event event) const;
+        void sslRead(https::Connection **connPtr) const;
+        void sslWrite(https::Connection **connPtr);
+        void start(int threadPoolSize);
+        void end();
+        void makeSSLConnection(https::Connection **conPtr);
+        void loadHTML(const std::string &path);
+        void rearmConnection(Connection **connPtr, int events) const;
+        void rearmSocket(int fd) const;
     };
 }
 

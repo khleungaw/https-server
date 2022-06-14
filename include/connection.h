@@ -10,13 +10,33 @@
 #include <sstream>
 
 namespace https {
-    struct Request {
+    //States for the connection:
+    //0: TLS not yet established
+    //1: Waiting for read
+    //2: Waiting for write
+    struct Connection {
+        int fd;
+        int port;
+        int state = 0;
+        SSL *ssl = nullptr;
         std::string method;
         std::string path;
         std::string version;
 
-        void updateRequest(const std::string& req) {
-            //Split the request into lines
+        explicit Connection(int fd, int port) : fd(fd), port(port) {};
+
+        void end() const {
+            if (ssl != nullptr) {
+                //Close SSL connection
+                SSL_shutdown(ssl);
+                SSL_free(ssl);
+            }
+            //Close socket
+            shutdown(fd, SHUT_RD);
+            close(fd);
+        }
+
+        void setReq(const std::string& req) {
             std::stringstream requestStream(req);
             std::string line;
             for (int i = 0; std::getline(requestStream, line); i++) {
@@ -35,23 +55,13 @@ namespace https {
                 }
             }
         }
-    };
 
-    //States for the connection:
-    //0: TLS not yet established
-    //1: Waiting for read
-    //2: Waiting for write
-    struct Connection {
-        int fd;
-        int port;
-        int state = 0;
-        SSL *ssl = nullptr;
-        std::string method;
-        std::string path;
-        std::string version;
-        explicit Connection(int fd, int port) : fd(fd), port(port) {};
+        void clearReq() {
+            method.clear();
+            path.clear();
+            version.clear();
+        }
     };
-
 }
 
 
