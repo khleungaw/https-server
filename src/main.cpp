@@ -2,16 +2,18 @@
 #include <iostream>
 #include "../include/server.h"
 
-int main() {
+int main(int argc, char *argv[]) {
+    //Get arguments
+    int httpPort = std::stoi(argv[1], nullptr, 10);
+    int httpsPort = std::stoi(argv[2], nullptr, 10);
+    char *certFile = argv[3];
+    char *keyFile = argv[4];
+    int threadPoolSize = std::stoi(argv[5], nullptr, 10);
+    bool useListener = std::stoi(argv[6], nullptr, 10);
+
     //Initialize variables
-    int httpPort = std::getenv("HTTP_PORT") ? std::stoi(getenv("HTTP_PORT")) : 8080;
-    int httpsPort = std::getenv("HTTPS_PORT") ? std::stoi(getenv("HTTPS_PORT")) : 4430;
     std::string rootPath = std::getenv( "ROOT" ) ? getenv( "ROOT" ) : "../";
-    std::string certFilePath = rootPath + "key/cert.crt";
-    std::string keyFilePath = rootPath + "key/key.pem";
     std::string htmlFilePath = rootPath + "public/index.html";
-    char *certFile = const_cast<char *>(certFilePath.c_str());
-    char *keyFile = const_cast<char *>(keyFilePath.c_str());
 
     //Initialize OpenSSL
     SSL_library_init();
@@ -19,8 +21,10 @@ int main() {
     //Create a server
     https::Server server(certFile, keyFile, httpsPort, httpPort, htmlFilePath);
 
-
-
     //Starts server
-    server.start(4);
+    if (useListener) {
+        server.startWithListener(threadPoolSize);
+    } else {
+        server.start(threadPoolSize);
+    }
 }

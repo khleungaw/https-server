@@ -23,7 +23,7 @@ namespace https {
         SSL_CTX *sslCtx;
         int sigExitFD;
         int sigPipeFD;
-        int epollFD;
+        int mainEpollFD;
         std::string htmlText;
     public:
         Server(char *certFile, char *keyFile, int httpsPort, int httpPort, const std::string& htmlFilePath);
@@ -32,20 +32,31 @@ namespace https {
         static int setupPipeFD();
         void setupSocketEpoll();
         void setupSignalEpoll() const;
+        void loadHTML(const std::string &path);
 
+        void start(int threadPoolSize);
+        void startWithListener(int threadPoolSize);
+        void end();
         void handleEvents();
-        void processSigExit();
-        void processSocket(int fd);
+        void processSocket(int socketFD, int epollFD);
         void processHTTPS(epoll_event event);
         void processHTTP(epoll_event event) const;
+        void processSigExit();
+        void makeSSLConnection(https::Connection **conPtr);
         void sslRead(https::Connection **connPtr) const;
         void sslWrite(https::Connection **connPtr);
-        void start(int threadPoolSize);
-        void end();
-        void makeSSLConnection(https::Connection **conPtr);
-        void loadHTML(const std::string &path);
         void rearmConnection(Connection **connPtr, int events) const;
         void rearmSocket(int fd) const;
+
+        //Alternate methods for setup with listener thread
+        void handleListenerEvents(int *workerEpollFDs);
+        void handleWorkerEvents(int epollFD);
+        void processHTTPS(epoll_event event, int epollFD);
+        static void processHTTP(epoll_event , int epollFD) ;
+        void makeSSLConnection(https::Connection **conPtr, int epollFD);
+        static void sslRead(https::Connection **connPtr, int epollFD) ;
+        void sslWrite(https::Connection **connPtr, int epollFD);
+        static void rearmConnection(Connection **connPtr, int events, int epollFD) ;
     };
 }
 

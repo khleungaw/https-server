@@ -2,7 +2,6 @@
 // Created by Solace on 6/10/2022.
 //
 
-#include <cstring>
 #include "message.h"
 
 std::string https::generateResponse(const std::string &html) {
@@ -15,15 +14,15 @@ std::string https::generateResponse(const std::string &html) {
     return httpResponse;
 }
 
-char* https::generateRedirect() {
-    auto buffer = new char[128];
-    strcat(buffer, "HTTP/1.1 301 Moved Permanently\r\n");
-    strcat(buffer, "Connection: close\r\n");
-    strcat(buffer, "Location: https://");
-    strcat(buffer, std::getenv("DOMAIN") ? getenv("DOMAIN") : "localhost");
-    strcat(buffer, ":");
-    strcat(buffer, std::getenv("HTTPS_PORT") ? getenv("HTTPS_PORT") : "4430");
-    strcat(buffer, "\r\n\r\n");
+std::string https::generateRedirect() {
+    std::string domain = (std::getenv("DOMAIN") ? getenv("DOMAIN") : "172.18.200.13");
+    std::string port = (std::getenv("HTTPS_PORT") ? getenv("HTTPS_PORT") : "4430");
+    std::string res =
+            "HTTP/1.1 301 Moved Permanently\r\n"
+            "Location: https://"
+            + domain + ":" + port + "/\r\n"
+            "\r\n"
+            "\r\n";
 
-    return buffer;
+    return res;
 }

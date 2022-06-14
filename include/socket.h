@@ -13,7 +13,7 @@
 
 
 namespace https {
-    constexpr int kMaxConnections = 1000;
+    constexpr int kMaxConnections = 10000;
 
     struct Socket {
         struct sockaddr_in address{};
