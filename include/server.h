@@ -49,7 +49,7 @@ namespace https {
         void rearmSocket(int fd) const;
 
         //Alternate methods for setup with listener thread
-        void handleListenerEvents(int *workerEpollFDs);
+        void handleListenerEvents(int *workerEpollFDs, int numWorkers);
         void handleWorkerEvents(int epollFD);
         void processHTTPS(epoll_event event, int epollFD);
         static void processHTTP(epoll_event , int epollFD) ;

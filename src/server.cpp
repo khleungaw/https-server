@@ -187,7 +187,7 @@ void https::Server::startWithListener(int threadPoolSize) {
     }
 
     //Starts listening
-    handleListenerEvents(epollFDs);
+    handleListenerEvents(epollFDs, threadPoolSize-1);
 }
 
 void https::Server::end() {
@@ -532,7 +532,7 @@ void https::Server::rearmSocket(int fd) const {
     epoll_ctl(mainEpollFD, EPOLL_CTL_MOD, fd, &event);
 }
 
-void https::Server::handleListenerEvents(int *workerEpollFDs) {
+void https::Server::handleListenerEvents(int *workerEpollFDs, int numWorkers) {
     int workerIterator = 0;
     while (true) {
         //Wait for epoll event
@@ -555,6 +555,11 @@ void https::Server::handleListenerEvents(int *workerEpollFDs) {
             if (epollEvents[i].data.fd == httpsSocket->fd || //Socket events
                 epollEvents[i].data.fd == httpSocket->fd ) {
                 processSocket(epollEvents[i].data.fd, workerEpollFDs[workerIterator]);
+                if (workerIterator == numWorkers - 1) {
+                    workerIterator = 0;
+                } else {
+                    workerIterator++;
+                }
             }
         }
     }
