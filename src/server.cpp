@@ -13,12 +13,14 @@
 #include <openssl/err.h>
 #include <arpa/inet.h>
 #include <fstream>
+#include <utility>
 #include "server.h"
 #include "socket.h"
 #include "message.h"
 
-https::Server::Server(char *certFile, char *keyFile, int httpsPort, int httpPort, const std::string& htmlFilePath) {
+https::Server::Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string& htmlFilePath) {
     loadHTML(htmlFilePath);
+    serverDomain = std::move(domain);
     //Create sockets
     this->httpsSocket = new Socket(httpsPort);
     this->httpSocket = new Socket(httpPort);
@@ -173,23 +175,6 @@ void https::Server::start(int threadPoolSize) {
     handleEvents();
 }
 
-void https::Server::startWithListener(int threadPoolSize) {
-    //Create EPOLLs for workers
-    int epollFDs[threadPoolSize-1];
-    for (int i = 0; i < threadPoolSize -1; i++) {
-        epollFDs[i] = epoll_create1(0);
-    }
-
-    //Create worker threads
-    for (int i = 0; i < threadPoolSize-1; i++) {
-        std::thread worker(&https::Server::handleWorkerEvents, this, epollFDs[i]);
-        worker.detach();
-    }
-
-    //Starts listening
-    handleListenerEvents(epollFDs, threadPoolSize-1);
-}
-
 void https::Server::end() {
     //Clean up
     SSL_CTX_free(sslCtx);
@@ -208,17 +193,17 @@ void https::Server::handleEvents() {
         }
 
         for (int i = 0; i < waitResult; i++) {
+            if (epollEvents[i].data.fd == httpsSocket->fd || //Socket events
+                epollEvents[i].data.fd == httpSocket->fd ) {
+                processSocket(epollEvents[i].data.fd);
+                continue;
+            }
             if (epollEvents[i].data.fd == sigExitFD) { //SIGINT/SIGTERM
                 processSigExit();
                 continue;
             }
             if (epollEvents[i].data.fd == sigPipeFD) { //SIGPIPE
-                //std::cout << "SIGPIPE received. Ignoring." << std::endl;
-                continue;
-            }
-            if (epollEvents[i].data.fd == httpsSocket->fd || //Socket events
-                epollEvents[i].data.fd == httpSocket->fd ) {
-                processSocket(epollEvents[i].data.fd, mainEpollFD);
+                //Ignore
                 continue;
             }
             //Else, must be connections
@@ -231,12 +216,10 @@ void https::Server::handleEvents() {
     }
 }
 
-void https::Server::processSocket(int socketFD, int epollFD) {
+void https::Server::processSocket(int socketFD) {
     //Initialize client address
     struct sockaddr_in clientAddress{};
     socklen_t clientAddressLength = sizeof(clientAddress);
-    char clientAddressBuffer[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(clientAddress.sin_addr), clientAddressBuffer, INET_ADDRSTRLEN);
 
     //Accept client connection
     int acceptedFD;
@@ -247,6 +230,7 @@ void https::Server::processSocket(int socketFD, int epollFD) {
             return;
         } else {
             std::cout << "Accept Failed: " << std::strerror(errno) << std::endl;
+            rearmSocket(socketFD);
             return;
         }
     }
@@ -257,7 +241,7 @@ void https::Server::processSocket(int socketFD, int epollFD) {
     //Create struct connection for client
     int port = (socketFD == httpsSocket->fd) ? httpsSocket->port : httpSocket->port;
     uint32_t connectionEvents = (socketFD == httpsSocket->fd) ?
-                                (EPOLLIN | EPOLLOUT | EPOLLET | EPOLLONESHOT) : (EPOLLOUT | EPOLLET | EPOLLONESHOT);
+                                (EPOLLIN | EPOLLET | EPOLLONESHOT) : (EPOLLOUT | EPOLLET | EPOLLONESHOT);
     auto *connection = new https::Connection(acceptedFD, port);
 
     //Distribute client connection to worker thread
@@ -265,7 +249,7 @@ void https::Server::processSocket(int socketFD, int epollFD) {
     event.events = connectionEvents;
     event.data.ptr = connection;
     std::cout << "Adding Connection: " << connection << std::endl;
-    if (epoll_ctl(epollFD, EPOLL_CTL_ADD, acceptedFD, &event) < 0) {
+    if (epoll_ctl(mainEpollFD, EPOLL_CTL_ADD, acceptedFD, &event) < 0) {
         std::string error = std::strerror(errno);
         throw std::runtime_error("Adding Client Connection to Worker Epoll Failed: " + error);
     }
@@ -288,7 +272,7 @@ void https::Server::processHTTPS(epoll_event event) {
         switch (connection->state) {
             case 0: { //TLS not yet established
                 //Establish TLS
-                makeSSLConnection(&connection);
+                makeSSLConnectionLoop(&connection);
                 break;
             }
             case 1: //Waiting for read
@@ -304,7 +288,7 @@ void https::Server::processHTTPS(epoll_event event) {
     if (event.events & EPOLLOUT) { //EPOLLOUT
         switch (connection->state) {
             case 0 : { //TLS not yet established
-                makeSSLConnection(&connection);
+                makeSSLConnectionLoop(&connection);
                 break;
             }
             case 1: //Waiting for read
@@ -330,7 +314,7 @@ void https::Server::processHTTP(epoll_event event) const {
     }
 
     if (event.events & EPOLLOUT) { //EPOLLOUT
-        std::string res = https::generateRedirect();
+        std::string res = https::generateRedirect(serverDomain, httpsSocket->port);
         std::cout << "HTTP Response: \n" << res << std::endl;
         size_t resSize = res.length();
         char *resBuffer = new char[resSize];
@@ -357,7 +341,7 @@ void https::Server::processSigExit() {
     exit(1);
 }
 
-void https::Server::makeSSLConnection(https::Connection **conPtr) {
+__attribute__((unused)) void https::Server::makeSSLConnection(https::Connection **conPtr) {
     auto *connection = *conPtr;
     if (connection->ssl == nullptr) {
         //Create new ssl state
@@ -374,12 +358,14 @@ void https::Server::makeSSLConnection(https::Connection **conPtr) {
         if (biosResult == 0) {
             char buffer[256];
             ERR_error_string(ERR_get_error(), buffer);
+            throw std::runtime_error("Setting SSL File Descriptor Failed: "+std::string(buffer));
         }
 
         connection->ssl = ssl;
     }
 
-    //Attempt handshake
+    //Attempt handshake until success
+    std::cout << std::this_thread::get_id() << ": SSL Handshake : " << connection << " | " << SSL_state_string_long(connection->ssl) << std::endl;
     int handshakeResult = SSL_accept(connection->ssl);
     if (handshakeResult < 0) { //Handshake failed
         int sslError = SSL_get_error(connection->ssl, handshakeResult);
@@ -421,15 +407,95 @@ void https::Server::makeSSLConnection(https::Connection **conPtr) {
     }
 }
 
+void https::Server::makeSSLConnectionLoop(https::Connection **conPtr) {
+    auto *connection = *conPtr;
+    if (connection->ssl == nullptr) {
+        //Create new ssl state
+        SSL *ssl = SSL_new(sslCtx);
+        if (ssl == nullptr) {
+            char buffer[256];
+            ERR_error_string(ERR_get_error(), buffer);
+            std::string error(buffer);
+            throw std::runtime_error("Creating SSL State Failed: "+error);
+        }
+
+        //Copy client to SSL
+        int biosResult = SSL_set_fd(ssl, connection->fd);
+        if (biosResult == 0) {
+            char buffer[256];
+            ERR_error_string(ERR_get_error(), buffer);
+            throw std::runtime_error("Setting SSL File Descriptor Failed: "+std::string(buffer));
+        }
+
+        connection->ssl = ssl;
+    }
+
+    //Attempt handshake until success
+    std::cout << std::this_thread::get_id() << ": SSL Handshake : " << connection << " | " << SSL_state_string_long(connection->ssl) << std::endl;
+    while (true) {
+        int handshakeResult = SSL_accept(connection->ssl);
+        if (handshakeResult < 0) { //Handshake failed
+            int sslError = SSL_get_error(connection->ssl, handshakeResult);
+            std::cout << "SSL Error: " << sslError << " | " << SSL_state_string_long(connection->ssl) << " | " << SSL_is_init_finished(connection->ssl) << std::endl;
+            switch (sslError) {
+                case SSL_ERROR_WANT_READ: { //2, Need to read more data
+                    //Use select to wait for more data
+                    fd_set readFDs;
+                    FD_ZERO(&readFDs);
+                    FD_SET(connection->fd, &readFDs);
+                    select(connection->fd+1, &readFDs, nullptr, nullptr, nullptr);
+                    continue;
+                }
+                case SSL_ERROR_WANT_WRITE: { //3, Need to write more data
+                    //Use select to wait for more data
+                    fd_set writeFDs;
+                    FD_ZERO(&writeFDs);
+                    FD_SET(connection->fd, &writeFDs);
+                    select(connection->fd+1, nullptr, &writeFDs, nullptr, nullptr);
+                    continue;
+                }
+                case SSL_ERROR_SSL: //1, General SSL error
+                    char buffer[256];
+                    std::cout << ERR_error_string(ERR_get_error(), buffer) << std::endl;
+                    std::cout << SSL_state_string_long(connection->ssl) << std::endl;
+                    SSL_free(connection->ssl);
+                    connection->ssl = nullptr;
+                    connection->end();
+                    break;
+                case SSL_ERROR_SYSCALL: //System call error
+                    char buff[256];
+                    std::cout << ERR_error_string(ERR_get_error(), buff) << std::endl;
+                    std::cout << "System Call Error: " << std::strerror(errno) << std::endl;
+                    if (errno == ECONNRESET) {
+                        SSL_free(connection->ssl);
+                        connection->ssl = nullptr;
+                    }
+                    connection->end();
+                    break;
+                default:
+                    std::cout << "Unknown Error" << std::endl;
+                    SSL_free(connection->ssl);
+                    connection->ssl = nullptr;
+                    connection->end();
+            }
+            break;
+        } else { //Handshake successful
+            connection->state = 1;
+            //rearmConnection(&connection, EPOLLIN);
+            sslRead(conPtr);
+            break;
+        }
+    }
+}
+
 void https::Server::sslRead(https::Connection **connPtr) const {
     auto *connection = *connPtr;
     //Read client parsedReq until EOF
     char buffer[kBufferSize];
     int readResult = SSL_read(connection->ssl, buffer, kBufferSize);
-    //std::cout << "Read Result: " << readResult << std::endl;
-    std::cout << "Read Connection: " << connection << " | " << connection->state << " | " << connection->method << std::endl;
+    std::cout << std::this_thread::get_id() << ": Read Connection: " << connection << " | " << connection->state << " | " << readResult << std::endl;
 
-    if (readResult < 0) {
+    if (readResult <= 0) {
         int error = SSL_get_error(connection->ssl, readResult);
         switch (error) {
             case SSL_ERROR_WANT_READ:
@@ -438,8 +504,8 @@ void https::Server::sslRead(https::Connection **connPtr) const {
             case SSL_ERROR_WANT_WRITE:
                 rearmConnection(&connection, EPOLLOUT);
                 break;
-            case SSL_ERROR_ZERO_RETURN:
-                rearmConnection(&connection, EPOLLOUT | EPOLLIN);
+            case SSL_ERROR_ZERO_RETURN: //TLS connection closed
+                connection->end();
                 break;
             case SSL_ERROR_SSL:
                 SSL_free(connection->ssl);
@@ -454,12 +520,20 @@ void https::Server::sslRead(https::Connection **connPtr) const {
                 std::cout << "SSL Write Unknown Error: " << error << std::endl;
                 break;
         }
-    } else if (readResult == 0) { //EOF
-        rearmConnection(&connection, EPOLLIN | EPOLLOUT);
-    } else {
+    } else if (readResult <= kBufferSize) { //Read successful
         connection->setReq(buffer);
         connection->state = 2;
         rearmConnection(&connection, EPOLLOUT);
+    } else { //Read too large , retry with larger buffer size
+        char largerBuffer[readResult];
+        readResult = SSL_read(connection->ssl, largerBuffer, readResult);
+        if (readResult < 0) {
+            throw std::runtime_error("SSL Second Read Failed");
+        } else {
+            connection->setReq(largerBuffer);
+            connection->state = 2;
+            rearmConnection(&connection, EPOLLOUT);
+        }
     }
 }
 
@@ -478,10 +552,10 @@ void https::Server::sslWrite(https::Connection **connPtr) {
     //Prepare response
     char resBuffer[response.length()];
     strcpy(resBuffer, response.c_str());
-    int resBufferLen = response.length();
+    int resBufferLen = strIntLength(response.length());
     int bytesWritten = 0;
 
-    std::cout << "Writing Connection: " << connection << " | " << connection->method << std::endl;
+    std::cout << std::this_thread::get_id() << ": Writing Connection: " << connection << " | " << connection->method << std::endl;
 
     //Write until EOF
     int writeResult = SSL_write(connection->ssl, resBuffer + bytesWritten, resBufferLen - bytesWritten);
@@ -495,7 +569,7 @@ void https::Server::sslWrite(https::Connection **connPtr) {
                 rearmConnection(&connection, EPOLLOUT);
                 break;
             case SSL_ERROR_ZERO_RETURN:
-                rearmConnection(&connection, EPOLLOUT | EPOLLIN);
+                connection->end();
                 break;
             case SSL_ERROR_SSL:
                 SSL_free(connection->ssl);
@@ -518,6 +592,7 @@ void https::Server::sslWrite(https::Connection **connPtr) {
 }
 
 void https::Server::rearmConnection(https::Connection **connPtr, int events) const {
+    std::cout << std::this_thread::get_id() << ": Rearm Connection: " << *connPtr << std::endl;
     auto *connection = *connPtr;
     struct epoll_event event{};
     event.events = events | EPOLLET | EPOLLONESHOT;
@@ -530,304 +605,6 @@ void https::Server::rearmSocket(int fd) const {
     event.events = EPOLLIN | EPOLLET | EPOLLONESHOT;
     event.data.fd = fd;
     epoll_ctl(mainEpollFD, EPOLL_CTL_MOD, fd, &event);
-}
-
-void https::Server::handleListenerEvents(int *workerEpollFDs, int numWorkers) {
-    int workerIterator = 0;
-    while (true) {
-        //Wait for epoll event
-        struct epoll_event epollEvents[10000];
-        int waitResult = epoll_wait(mainEpollFD, epollEvents, 10000, -1);
-        if (waitResult < 0) {
-            std::string error = std::strerror(errno);
-            throw std::runtime_error("Socket EPOLL Wait Failed: " + error);
-        }
-
-        for (int i = 0; i < waitResult; i++) {
-            if (epollEvents[i].data.fd == sigExitFD) { //SIGINT/SIGTERM
-                processSigExit();
-                continue;
-            }
-            if (epollEvents[i].data.fd == sigPipeFD) { //SIGPIPE
-                //std::cout << "SIGPIPE received. Ignoring." << std::endl;
-                continue;
-            }
-            if (epollEvents[i].data.fd == httpsSocket->fd || //Socket events
-                epollEvents[i].data.fd == httpSocket->fd ) {
-                processSocket(epollEvents[i].data.fd, workerEpollFDs[workerIterator]);
-                if (workerIterator == numWorkers - 1) {
-                    workerIterator = 0;
-                } else {
-                    workerIterator++;
-                }
-            }
-        }
-    }
-}
-
-void https::Server::handleWorkerEvents(int epollFD) {
-    while (true) {
-        //Wait for epoll event
-        struct epoll_event epollEvents[10000];
-        int waitResult = epoll_wait(epollFD, epollEvents, 10000, -1);
-        if (waitResult < 0) {
-            std::string error = std::strerror(errno);
-            throw std::runtime_error("Socket EPOLL Wait Failed: " + error);
-        }
-
-        for (int i = 0; i < waitResult; i++) {
-            auto *connection = (https::Connection *)epollEvents[i].data.ptr;
-            if (connection->port == httpsSocket->port)
-                processHTTPS(epollEvents[i], epollFD);
-            else
-                processHTTP(epollEvents[i], epollFD);
-        }
-    }
-}
-
-void https::Server::processHTTPS(epoll_event event, int epollFD) {
-    //Get connection struct from epoll event
-    auto *connection = (https::Connection *) event.data.ptr;
-    std::cout << std::this_thread::get_id() <<": Received HTTPS Connection: " << event.data.ptr << " | "<< connection->state << " | "<< event.events << std::endl;
-
-    if ((event.events & EPOLLERR) || (event.events & EPOLLHUP)) {
-        //Close connection
-        connection->end();
-        return;
-    }
-    if (event.events & EPOLLIN) { //EPOLLIN
-        switch (connection->state) {
-            case 0: { //TLS not yet established
-                //Establish TLS
-                makeSSLConnection(&connection, epollFD);
-                break;
-            }
-            case 1: //Waiting for read
-                sslRead(&connection, epollFD);
-                break;
-            case 2: //Waiting for write
-                //rearmConnection(&connection);
-                break;
-            default:
-                throw std::runtime_error("Invalid Connection State");
-        }
-    }
-    if (event.events & EPOLLOUT) { //EPOLLOUT
-        switch (connection->state) {
-            case 0 : { //TLS not yet established
-                makeSSLConnection(&connection, epollFD);
-                break;
-            }
-            case 1: //Waiting for read
-                //rearmConnection(&connection);
-                break; //EPOLLOUT, not certain whether you can write
-            case 2: //Waiting for write
-                sslWrite(&connection, epollFD);
-                return;
-            default:
-                throw std::runtime_error("Invalid Connection State");
-        }
-    }
-}
-
-void https::Server::processHTTP(epoll_event event, int epollFD) {
-    //Get connection struct from epoll event
-    auto *connection = (https::Connection *) event.data.ptr;
-    std::cout << "Received HTTP Connection: " << event.data.ptr << " | "<< connection->state << " | "<< event.events << std::endl;
-
-    if ((event.events & EPOLLERR) || (event.events & EPOLLHUP)) {
-        connection->end();
-        return;
-    }
-
-    if (event.events & EPOLLOUT) { //EPOLLOUT
-        std::string res = https::generateRedirect();
-        std::cout << "HTTP Response: \n" << res << std::endl;
-        size_t resSize = res.length();
-        char *resBuffer = new char[resSize];
-        strcpy(resBuffer, res.c_str());
-        ssize_t writeResult = write(connection->fd, resBuffer, resSize);
-        std::cout << "Wrote: " << writeResult << std::endl;
-        if (writeResult <= 0) {
-            switch (errno) {
-                case EAGAIN:
-                    rearmConnection(&connection, EPOLLOUT, epollFD);
-                    break;
-                default:
-                    std::cout << "HTTP Write Failed: " << errno << std::endl;
-            }
-        } else {
-            connection->end();
-        }
-    }
-}
-
-void https::Server::makeSSLConnection(https::Connection **conPtr, int epollFD) {
-    auto *connection = *conPtr;
-    if (connection->ssl == nullptr) {
-        //Create new ssl state
-        SSL *ssl = SSL_new(sslCtx);
-        if (ssl == nullptr) {
-            char buffer[256];
-            ERR_error_string(ERR_get_error(), buffer);
-            std::string error(buffer);
-            throw std::runtime_error("Creating SSL State Failed: "+error);
-        }
-
-        //Copy client to SSL
-        int biosResult = SSL_set_fd(ssl, connection->fd);
-        if (biosResult == 0) {
-            char buffer[256];
-            ERR_error_string(ERR_get_error(), buffer);
-        }
-
-        connection->ssl = ssl;
-    }
-
-    //Attempt handshake
-    int handshakeResult = SSL_accept(connection->ssl);
-    if (handshakeResult < 0) { //Handshake failed
-        int sslError = SSL_get_error(connection->ssl, handshakeResult);
-        std::cout << "SSL Error: " << sslError << " | " << SSL_state_string_long(connection->ssl) << " | " << SSL_is_init_finished(connection->ssl) << std::endl;
-        switch (sslError) {
-            case SSL_ERROR_WANT_READ:  //2, Need to read more data
-                rearmConnection(&connection, EPOLLIN, epollFD);
-                break;
-            case SSL_ERROR_WANT_WRITE: //3, Need to write more data
-                rearmConnection(&connection, EPOLLOUT, epollFD);
-                break;
-            case SSL_ERROR_SSL: //1, General SSL error
-                char buffer[256];
-                std::cout << ERR_error_string(ERR_get_error(), buffer) << std::endl;
-                std::cout << SSL_state_string_long(connection->ssl) << std::endl;
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-                break;
-            case SSL_ERROR_SYSCALL: //System call error
-                char buff[256];
-                std::cout << ERR_error_string(ERR_get_error(), buff) << std::endl;
-                std::cout << "System Call Error: " << std::strerror(errno) << std::endl;
-                if (errno == ECONNRESET) {
-                    SSL_free(connection->ssl);
-                    connection->ssl = nullptr;
-                }
-                connection->end();
-                break;
-            default:
-                std::cout << "Unknown Error" << std::endl;
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-        }
-    } else { //Handshake successful
-        connection->state = 1;
-        rearmConnection(&connection, EPOLLIN, epollFD);
-    }
-}
-
-void https::Server::sslRead(https::Connection **connPtr, int epollFD) {
-    auto *connection = *connPtr;
-    //Read client parsedReq until EOF
-    char buffer[kBufferSize];
-    int readResult = SSL_read(connection->ssl, buffer, kBufferSize);
-    //std::cout << "Read Result: " << readResult << std::endl;
-    std::cout << "Read Connection: " << connection << " | " << connection->state << " | " << connection->method << std::endl;
-
-    if (readResult < 0) {
-        int error = SSL_get_error(connection->ssl, readResult);
-        switch (error) {
-            case SSL_ERROR_WANT_READ:
-                rearmConnection(&connection, EPOLLIN, epollFD);
-                break;
-            case SSL_ERROR_WANT_WRITE:
-                rearmConnection(&connection, EPOLLOUT, epollFD);
-                break;
-            case SSL_ERROR_ZERO_RETURN:
-                rearmConnection(&connection, EPOLLOUT | EPOLLIN, epollFD);
-                break;
-            case SSL_ERROR_SSL:
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-                std::cout << "SSL Write Failed: " << error << std::endl;
-                break;
-            default:
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-                std::cout << "SSL Write Unknown Error: " << error << std::endl;
-                break;
-        }
-    } else if (readResult == 0) { //EOF
-        rearmConnection(&connection, EPOLLIN | EPOLLOUT, epollFD);
-    } else {
-        connection->setReq(buffer);
-        connection->state = 2;
-        rearmConnection(&connection, EPOLLOUT, epollFD);
-    }
-}
-
-void https::Server::sslWrite(https::Connection **connPtr, int epollFD) {
-    auto *connection = *connPtr;
-    //Initialise response
-    std::string response;
-
-    //Only handle GET requests, reject the rest
-    if (connection->method == "GET") {
-        response = https::generateResponse(htmlText);
-    } else {
-        response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
-    }
-
-    //Prepare response
-    char resBuffer[response.length()];
-    strcpy(resBuffer, response.c_str());
-    int resBufferLen = response.length();
-    int bytesWritten = 0;
-
-    std::cout << "Writing Connection: " << connection << " | " << connection->method << std::endl;
-
-    //Write until EOF
-    int writeResult = SSL_write(connection->ssl, resBuffer + bytesWritten, resBufferLen - bytesWritten);
-    if (writeResult <= 0) {
-        int error = SSL_get_error(connection->ssl, writeResult);
-        switch (error) {
-            case SSL_ERROR_WANT_READ:
-                rearmConnection(&connection, EPOLLIN, epollFD);
-                break;
-            case SSL_ERROR_WANT_WRITE:
-                rearmConnection(&connection, EPOLLOUT, epollFD);
-                break;
-            case SSL_ERROR_ZERO_RETURN:
-                rearmConnection(&connection, EPOLLOUT | EPOLLIN, epollFD);
-                break;
-            case SSL_ERROR_SSL:
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-                std::cout << "SSL Write Failed: " << error << std::endl;
-                break;
-            default:
-                SSL_free(connection->ssl);
-                connection->ssl = nullptr;
-                connection->end();
-                std::cout << "SSL Write Unknown Error: " << error << std::endl;
-                break;
-        }
-    } else {
-        connection->state = 1;  //Update connection state
-        connection->clearReq(); //Clear request
-        rearmConnection(&connection, EPOLLIN, epollFD);
-    }
-}
-
-void https::Server::rearmConnection(https::Connection **connPtr, int events, int epollFD) {
-    auto *connection = *connPtr;
-    struct epoll_event event{};
-    event.events = events | EPOLLET | EPOLLONESHOT;
-    event.data.ptr = connection;
-    epoll_ctl(epollFD, EPOLL_CTL_MOD, connection->fd, &event);
 }
 
 

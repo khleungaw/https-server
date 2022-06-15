@@ -2,6 +2,7 @@
 // Created by Solace on 6/10/2022.
 //
 
+#include <stdexcept>
 #include "message.h"
 
 std::string https::generateResponse(const std::string &html) {
@@ -14,15 +15,21 @@ std::string https::generateResponse(const std::string &html) {
     return httpResponse;
 }
 
-std::string https::generateRedirect() {
-    std::string domain = (std::getenv("DOMAIN") ? getenv("DOMAIN") : "172.18.200.13");
-    std::string port = (std::getenv("HTTPS_PORT") ? getenv("HTTPS_PORT") : "4430");
+std::string https::generateRedirect(const std::string& domain, int httpsPort) {
     std::string res =
             "HTTP/1.1 301 Moved Permanently\r\n"
             "Location: https://"
-            + domain + ":" + port + "/\r\n"
+            + domain + ":" + std::to_string(httpsPort) + "/\r\n"
             "\r\n"
             "\r\n";
 
     return res;
+}
+
+int https::strIntLength(size_t strLength) {
+    if (strLength > INTMAX_MAX) {
+        throw std::runtime_error("String length is too long");
+    } else {
+        return static_cast<int>(strLength);
+    }
 }

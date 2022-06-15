@@ -10,7 +10,8 @@
 
 namespace https {
     std::string generateResponse(const std::string &html);
-    std::string generateRedirect();
+    std::string generateRedirect(const std::string& domain, int httpsPort);
+    int strIntLength(size_t strLength);
 }
 
 #endif //HTTPS_SERVER_MESSAGE_H

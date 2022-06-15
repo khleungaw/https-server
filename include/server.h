@@ -17,7 +17,7 @@ namespace https {
     constexpr size_t kBufferSize = 2048;
 
     class Server {
-    private:
+    protected:
         Socket *httpsSocket;
         Socket *httpSocket;
         SSL_CTX *sslCtx;
@@ -25,8 +25,9 @@ namespace https {
         int sigPipeFD;
         int mainEpollFD;
         std::string htmlText;
+        std::string serverDomain;
     public:
-        Server(char *certFile, char *keyFile, int httpsPort, int httpPort, const std::string& htmlFilePath);
+        Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string& htmlFilePath);
         static SSL_CTX* setupSSL(char *certFile, char *keyFile );
         static int setupExitFD();
         static int setupPipeFD();
@@ -35,28 +36,18 @@ namespace https {
         void loadHTML(const std::string &path);
 
         void start(int threadPoolSize);
-        void startWithListener(int threadPoolSize);
         void end();
         void handleEvents();
-        void processSocket(int socketFD, int epollFD);
+        void processSocket(int socketFD);
         void processHTTPS(epoll_event event);
         void processHTTP(epoll_event event) const;
         void processSigExit();
-        void makeSSLConnection(https::Connection **conPtr);
+        __attribute__((unused)) void makeSSLConnection(https::Connection **conPtr);
+        void makeSSLConnectionLoop(https::Connection **conPtr);
         void sslRead(https::Connection **connPtr) const;
         void sslWrite(https::Connection **connPtr);
         void rearmConnection(Connection **connPtr, int events) const;
         void rearmSocket(int fd) const;
-
-        //Alternate methods for setup with listener thread
-        void handleListenerEvents(int *workerEpollFDs, int numWorkers);
-        void handleWorkerEvents(int epollFD);
-        void processHTTPS(epoll_event event, int epollFD);
-        static void processHTTP(epoll_event , int epollFD) ;
-        void makeSSLConnection(https::Connection **conPtr, int epollFD);
-        static void sslRead(https::Connection **connPtr, int epollFD) ;
-        void sslWrite(https::Connection **connPtr, int epollFD);
-        static void rearmConnection(Connection **connPtr, int events, int epollFD) ;
     };
 }
 
