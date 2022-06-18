@@ -21,15 +21,15 @@
 https::Server::Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string& htmlFilePath) {
     loadHTML(htmlFilePath);
     serverDomain = std::move(domain);
-    //Create sockets
+    //Initialize sockets
     this->httpsSocket = new Socket(httpsPort);
     this->httpSocket = new Socket(httpPort);
     //Initialize OpenSSL
     sslCtx = setupSSL(certFile, keyFile);
-    //Set up fd for signals
+    //Initialize fds for signals
     sigExitFD = setupExitFD();
     sigPipeFD = setupPipeFD();
-    //Setup listener epoll
+    //Initialize listener epoll
     mainEpollFD = epoll_create1(0);
     setupSocketEpoll();
     setupSignalEpoll();
@@ -183,10 +183,11 @@ void https::Server::end() {
 }
 
 void https::Server::handleEvents() {
+    int timeout = -1;
     while (true) {
         //Wait for epoll event
         struct epoll_event epollEvents[10000];
-        int waitResult = epoll_wait(mainEpollFD, epollEvents, 10000, -1);
+        int waitResult = epoll_wait(mainEpollFD, epollEvents, 10000, timeout);
         if (waitResult < 0) {
             std::string error = std::strerror(errno);
             throw std::runtime_error("Socket EPOLL Wait Failed: " + error);
@@ -272,14 +273,14 @@ void https::Server::processHTTPS(epoll_event event) {
         switch (connection->state) {
             case 0: { //TLS not yet established
                 //Establish TLS
-                makeSSLConnectionLoop(&connection);
+                makeSSLConnection(&connection);
                 break;
             }
             case 1: //Waiting for read
                 sslRead(&connection);
                 break;
             case 2: //Waiting for write
-                throw std::runtime_error("EPOLLIN with State 2");
+                break;
             default:
                 throw std::runtime_error("Invalid Connection State");
         }
@@ -287,11 +288,11 @@ void https::Server::processHTTPS(epoll_event event) {
     if (event.events & EPOLLOUT) { //EPOLLOUT
         switch (connection->state) {
             case 0 : { //TLS not yet established
-                makeSSLConnectionLoop(&connection);
+                makeSSLConnection(&connection);
                 break;
             }
             case 1: //Waiting for read
-                throw std::runtime_error("EPOLLOUT with State 1");
+                break;
             case 2: //Waiting for write
                 sslWrite(&connection);
                 return;
@@ -313,12 +314,12 @@ void https::Server::processHTTP(epoll_event event) const {
 
     if (event.events & EPOLLOUT) { //EPOLLOUT
         std::string res = https::generateRedirect(serverDomain, httpsSocket->port);
-        std::cout << "HTTP Response: \n" << res << std::endl;
+        //std::cout << "HTTP Response: \n" << res << std::endl;
         size_t resSize = res.length();
         char *resBuffer = new char[resSize];
         strcpy(resBuffer, res.c_str());
         ssize_t writeResult = write(connection->fd, resBuffer, resSize);
-        std::cout << "Wrote: " << writeResult << std::endl;
+        //std::cout << "Wrote: " << writeResult << std::endl;
         if (writeResult <= 0) {
             switch (errno) {
                 case EAGAIN:
@@ -339,7 +340,7 @@ void https::Server::processSigExit() {
     exit(1);
 }
 
-__attribute__((unused)) void https::Server::makeSSLConnection(https::Connection **conPtr) {
+void https::Server::makeSSLConnection(https::Connection **conPtr) {
     auto *connection = *conPtr;
     if (connection->ssl == nullptr) {
         //Create new ssl state
@@ -363,7 +364,7 @@ __attribute__((unused)) void https::Server::makeSSLConnection(https::Connection 
     }
 
     //Attempt handshake until success
-    std::cout << std::this_thread::get_id() << ": SSL Handshake : " << connection << " | " << SSL_state_string_long(connection->ssl) << std::endl;
+    //std::cout << std::this_thread::get_id() << ": SSL Handshake : " << connection << " | " << SSL_state_string_long(connection->ssl) << std::endl;
     int handshakeResult = SSL_accept(connection->ssl);
     if (handshakeResult < 0) { //Handshake failed
         int sslError = SSL_get_error(connection->ssl, handshakeResult);
@@ -405,7 +406,7 @@ __attribute__((unused)) void https::Server::makeSSLConnection(https::Connection 
     }
 }
 
-void https::Server::makeSSLConnectionLoop(https::Connection **conPtr) {
+__attribute__((unused)) void https::Server::makeSSLConnectionLoop(https::Connection **conPtr) {
     auto *connection = *conPtr;
     if (connection->ssl == nullptr) {
         //Create new ssl state
@@ -550,7 +551,7 @@ void https::Server::sslWrite(https::Connection **connPtr) {
     //Prepare response
     char resBuffer[response.length()];
     strcpy(resBuffer, response.c_str());
-    int resBufferLen = strIntLength(response.length());
+    int resBufferLen = https::unsignedLongToInt(response.length());
     int bytesWritten = 0;
 
     //std::cout << std::this_thread::get_id() << ": Writing Connection: " << connection << " | " << connection->method << std::endl;

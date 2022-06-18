@@ -26,7 +26,7 @@ std::string https::generateRedirect(const std::string& domain, int httpsPort) {
     return res;
 }
 
-int https::strIntLength(size_t strLength) {
+int https::unsignedLongToInt(size_t strLength) {
     if (strLength > INTMAX_MAX) {
         throw std::runtime_error("String length is too long");
     } else {

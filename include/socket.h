@@ -38,8 +38,8 @@ namespace https {
             setNonBlocking(fd);
 
             //Set to KEEPALIVE
-            int keepAlive = 1;
-            if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(keepAlive)) < 0) {
+            int optVal = 1;
+            if (setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &optVal, sizeof(optVal)) < 0) {
                 std::string error = std::strerror(errno);
                 throw std::runtime_error("Setting KeepAlive failed: " + error);
             }

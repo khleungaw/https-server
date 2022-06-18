@@ -3,13 +3,6 @@
 #include "../include/server.h"
 #include "listener_server.h"
 
-#ifdef DEBUG
-#define DEBUG_MSG(str) do { std::cout << str << std::endl; } while( false )
-#else
-#define DEBUG_MSG(str) do { } while ( false )
-#endif
-
-
 int main(int argc, char *argv[]) {
     if (argc < 8) {
         std::cout << "Usage: " << argv[0] << " <certFile> <keyFile> <httpsPort> <htmlFilePath> <threadPoolSize> <useListener> <domain>" << std::endl;

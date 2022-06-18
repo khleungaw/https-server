@@ -42,8 +42,8 @@ namespace https {
         void processHTTPS(epoll_event event);
         void processHTTP(epoll_event event) const;
         void processSigExit();
-        __attribute__((unused)) void makeSSLConnection(https::Connection **conPtr);
-        void makeSSLConnectionLoop(https::Connection **conPtr);
+        void makeSSLConnection(https::Connection **conPtr);
+        __attribute__((unused)) void makeSSLConnectionLoop(https::Connection **conPtr);
         void sslRead(https::Connection **connPtr) const;
         void sslWrite(https::Connection **connPtr);
         void rearmConnection(Connection **connPtr, int events) const;
