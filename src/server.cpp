@@ -601,7 +601,6 @@ void https::Server::sslWrite(https::Connection **connPtr) {
             buffer = new char[bufferSize];
             strcpy(buffer, header);
             memcpy(&buffer[strlen(header)], files[connection->path]->data, files[connection->path]->size);
-            std::cout << strlen(buffer) << std::endl;
         }
     } else {
         bufferSize = 35;
