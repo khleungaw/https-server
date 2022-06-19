@@ -9,9 +9,17 @@
 
 
 namespace https {
-    std::string generateResponse(const std::string &html);
+    struct File {
+        char *data = nullptr;
+        size_t size = 0;
+        std::string extension;
+        File() = default;
+    };
+
+    char* generateHeader(const std::shared_ptr<File> &file);
     std::string generateRedirect(const std::string& domain, int httpsPort);
-    int unsignedLongToInt(size_t strLength);
+    int unsignedLongToInt(size_t num);
+    long unsignedLongToLong(size_t num);
 }
 
 #endif //HTTPS_SERVER_MESSAGE_H

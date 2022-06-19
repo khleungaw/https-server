@@ -18,8 +18,8 @@
 #include "listener_server.h"
 
 https::ListenerServer::ListenerServer
-    (char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &htmlFilePath) :
-    Server(certFile, keyFile, std::move(domain), httpsPort, httpPort, htmlFilePath) {
+    (char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolderPath) :
+    Server(certFile, keyFile, std::move(domain), httpsPort, httpPort, publicFolderPath) {
 }
 
 void https::ListenerServer::startWithListener(int threadPoolSize) {
@@ -326,25 +326,34 @@ void https::ListenerServer::workerSSLRead(https::Connection **connPtr) {
 void https::ListenerServer::workerSSLWrite(https::Connection **connPtr) {
     auto *connection = *connPtr;
     //Initialise response
-    std::string response;
+    char *buffer;
+    int bufferSize;
 
     //Only handle GET requests, reject the rest
     if (connection->method == "GET") {
-        response = https::generateResponse(htmlText);
+        //Check if the requested file exists
+        if (files.count(connection->path) == 0) {
+            //Generate 404 response
+            bufferSize = 26;
+            buffer = new char[bufferSize];
+            strcpy(buffer, "HTTP/1.1 404 Not Found\r\n");
+        } else {
+            char *header = https::generateHeader(files[connection->path]);
+            bufferSize = unsignedLongToInt(strlen(header))+unsignedLongToInt(files[connection->path]->size);
+            buffer = new char[bufferSize];
+            strcpy(buffer, header);
+            memcpy(&buffer[strlen(header)], files[connection->path]->data, files[connection->path]->size);
+        }
     } else {
-        response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
+        bufferSize = 35;
+        buffer = new char[bufferSize];
+        strcpy(buffer, "HTTP/1.1 405 Method Not Allowed\r\n");
     }
-
-    //Prepare response
-    char resBuffer[response.length()];
-    strcpy(resBuffer, response.c_str());
-    int resBufferLen = https::unsignedLongToInt(response.length());
-    int bytesWritten = 0;
 
     //std::cout << "Writing Connection: " << connection << " | " << connection->method << std::endl;
 
     //Write until EOF
-    int writeResult = SSL_write(connection->ssl, resBuffer + bytesWritten, resBufferLen - bytesWritten);
+    int writeResult = SSL_write(connection->ssl, buffer, bufferSize);
     if (writeResult <= 0) {
         int error = SSL_get_error(connection->ssl, writeResult);
         switch (error) {
@@ -372,4 +381,5 @@ void https::ListenerServer::workerSSLWrite(https::Connection **connPtr) {
         connection->state = 1;  //Update connection state
         connection->clearReq(); //Clear request
     }
+    delete[] buffer;
 }

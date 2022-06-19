@@ -6,6 +6,7 @@
 #include <cstring>
 #include <csignal>
 #include <thread>
+#include <filesystem>
 #include <algorithm>
 #include <unistd.h>
 #include <sys/epoll.h>
@@ -18,8 +19,7 @@
 #include "socket.h"
 #include "message.h"
 
-https::Server::Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string& htmlFilePath) {
-    loadHTML(htmlFilePath);
+https::Server::Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolder) {
     serverDomain = std::move(domain);
     //Initialize sockets
     this->httpsSocket = new Socket(httpsPort);
@@ -33,6 +33,17 @@ https::Server::Server(char *certFile, char *keyFile, std::string domain, int htt
     mainEpollFD = epoll_create1(0);
     setupSocketEpoll();
     setupSignalEpoll();
+    //Check if public folder exists and is a folder
+    if (!std::filesystem::exists(publicFolder)) {
+        std::cerr << "Public folder does not exist" << std::endl;
+        exit(1);
+    }
+    if (!std::filesystem::is_directory(publicFolder)) {
+        std::cerr << "Public folder is not a folder" << std::endl;
+        exit(1);
+    }
+    //Load files from public folder
+    loadFiles(publicFolder);
 }
 
 SSL_CTX *https::Server::setupSSL(char *certFile, char *keyFile) {
@@ -153,15 +164,49 @@ void https::Server::setupSignalEpoll() const {
     }
 }
 
-void https::Server::loadHTML(const std::string &path) {
-    //Open file
-    std::ifstream file(path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Opening HTML File Failed");
+void https::Server::loadFiles(const std::string &path) {
+    //Load files from path
+    const std::filesystem::path publicFolder(path);
+    for (const auto &file : std::filesystem::recursive_directory_iterator(publicFolder)) {
+        if (file.is_regular_file()) {
+            //Check if file is a folder
+            if (!file.is_regular_file()) continue;
+
+            //Create file object in files
+            std::string key = "/";
+            if (file.path().extension() != ".html")
+                key += std::filesystem::relative(file.path(), publicFolder);
+            files[key] = std::make_shared<File>();
+            files[key]->size = file.file_size();
+
+            //Assign extension
+            if (file.path().extension() == ".html") {
+                files[key]->extension = "text/html";
+            } else if (file.path().extension() == ".css") {
+                files[key]->extension = "text/css";
+            } else if (file.path().extension() == ".js") {
+                files[key]->extension = "application/javascript";
+            } else if (file.path().extension() == ".png") {
+                files[key]->extension = "image/png";
+            } else if (file.path().extension() == ".jpg") {
+                files[key]->extension = "image/jpeg";
+            } else if (file.path().extension() == ".ico") {
+                files[key]->extension = "image/x-icon";
+            }
+
+
+            //Copy file content
+            files[key]->data = new char[files[key]->size];
+            std::ifstream fileStream(file.path(), std::ios::binary);
+            if (!fileStream.is_open()) {
+                throw std::runtime_error("Could not open file: " + file.path().string());
+            }
+            fileStream.read(files[key]->data, unsignedLongToInt(files[key]->size));
+            fileStream.close();
+        }
     }
-    //Write into memory
-    htmlText = std::string((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
+
+    std::cout << "Loaded " << files.size() << " files" << std::endl;
 }
 
 void https::Server::start(int threadPoolSize) {
@@ -539,25 +584,36 @@ void https::Server::sslRead(https::Connection **connPtr) const {
 void https::Server::sslWrite(https::Connection **connPtr) {
     auto *connection = *connPtr;
     //Initialise response
-    std::string response;
+    char *buffer;
+    int bufferSize;
 
     //Only handle GET requests, reject the rest
     if (connection->method == "GET") {
-        response = https::generateResponse(htmlText);
+        //Check if the requested file exists
+        if (files.count(connection->path) == 0) {
+            //Generate 404 response
+            bufferSize = 26;
+            buffer = new char[bufferSize];
+            strcpy(buffer, "HTTP/1.1 404 Not Found\r\n");
+        } else {
+            char *header = https::generateHeader(files[connection->path]);
+            bufferSize = unsignedLongToInt(strlen(header))+unsignedLongToInt(files[connection->path]->size);
+            buffer = new char[bufferSize];
+            strcpy(buffer, header);
+            memcpy(&buffer[strlen(header)], files[connection->path]->data, files[connection->path]->size);
+            std::cout << strlen(buffer) << std::endl;
+        }
     } else {
-        response = "HTTP/1.1 405 Method Not Allowed\r\n\r\n";
+        bufferSize = 35;
+        buffer = new char[bufferSize];
+        strcpy(buffer, "HTTP/1.1 405 Method Not Allowed\r\n");
     }
 
-    //Prepare response
-    char resBuffer[response.length()];
-    strcpy(resBuffer, response.c_str());
-    int resBufferLen = https::unsignedLongToInt(response.length());
-    int bytesWritten = 0;
-
-    //std::cout << std::this_thread::get_id() << ": Writing Connection: " << connection << " | " << connection->method << std::endl;
+    //std::cout << std::this_thread::get_id() << ": Writing Connection: " << connection << " | " << connection->method << " | " << connection->path << std::endl;
+    //std::cout << std::this_thread::get_id() << ": Response: " << buffer << std::endl;
 
     //Write until EOF
-    int writeResult = SSL_write(connection->ssl, resBuffer + bytesWritten, resBufferLen - bytesWritten);
+    int writeResult = SSL_write(connection->ssl, buffer, bufferSize);
     if (writeResult <= 0) {
         int error = SSL_get_error(connection->ssl, writeResult);
         switch (error) {
@@ -569,7 +625,6 @@ void https::Server::sslWrite(https::Connection **connPtr) {
                 break;
             case SSL_ERROR_ZERO_RETURN:
                 connection->end();
-                break;
             case SSL_ERROR_SSL:
                 SSL_free(connection->ssl);
                 connection->ssl = nullptr;
@@ -588,6 +643,8 @@ void https::Server::sslWrite(https::Connection **connPtr) {
         connection->clearReq(); //Clear request
         rearmConnection(&connection, EPOLLIN);
     }
+
+    delete[] buffer;
 }
 
 void https::Server::rearmConnection(https::Connection **connPtr, int events) const {

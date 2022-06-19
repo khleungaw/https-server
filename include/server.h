@@ -6,9 +6,10 @@
 #define HTTPS_SERVER_SERVER_H
 
 #include <vector>
-#include <map>
+#include <unordered_map>
 #include <openssl/ssl.h>
 #include <sys/epoll.h>
+#include <memory>
 #include "socket.h"
 #include "message.h"
 #include "connection.h"
@@ -26,14 +27,15 @@ namespace https {
         int mainEpollFD;
         std::string htmlText;
         std::string serverDomain;
+        std::unordered_map<std::string, std::shared_ptr<https::File>> files;
     public:
-        Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string& htmlFilePath);
+        Server(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolder);
         static SSL_CTX* setupSSL(char *certFile, char *keyFile );
         static int setupExitFD();
         static int setupPipeFD();
         void setupSocketEpoll();
         void setupSignalEpoll() const;
-        void loadHTML(const std::string &path);
+        void loadFiles(const std::string &path);
 
         void start(int threadPoolSize);
         void end();

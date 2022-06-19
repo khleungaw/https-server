@@ -3,16 +3,25 @@
 //
 
 #include <stdexcept>
+#include <climits>
+#include <memory>
+#include <cstring>
 #include "message.h"
 
-std::string https::generateResponse(const std::string &html) {
-    std::string httpResponse = "HTTP/1.1 200 OK\r\n";
-    httpResponse += "Content-Type: text/html\r\n";
-    httpResponse += "Content-Length: " + std::to_string(html.length()) + "\r\n";
-    httpResponse += "\r\n";
-    httpResponse += html;
+char* https::generateHeader(const std::shared_ptr<File> &file) {
+    //Size = 53 + extension length + file size length
+    int headerSize = 53 + unsignedLongToInt(file->extension.length()) + unsignedLongToInt(std::to_string(file->size).length());
+    auto *header = new char[headerSize];
 
-    return httpResponse;
+    strcpy(header, "HTTP/1.1 200 OK\r\n");
+    strcat(header, "Content-Type: ");
+    strcat(header, file->extension.c_str());
+    strcat(header, "\r\n");
+    strcat(header, "Content-Length: ");
+    strcat(header, std::to_string(file->size).c_str());
+    strcat(header, "\r\n\r\n");
+
+    return header;
 }
 
 std::string https::generateRedirect(const std::string& domain, int httpsPort) {
@@ -26,10 +35,18 @@ std::string https::generateRedirect(const std::string& domain, int httpsPort) {
     return res;
 }
 
-int https::unsignedLongToInt(size_t strLength) {
-    if (strLength > INTMAX_MAX) {
-        throw std::runtime_error("String length is too long");
+int https::unsignedLongToInt(size_t num) {
+    if (num > INTMAX_MAX) {
+        throw std::runtime_error("Unsigned long too large for int");
     } else {
-        return static_cast<int>(strLength);
+        return static_cast<int>(num);
+    }
+}
+
+long https::unsignedLongToLong(size_t num) {
+    if (num > LLONG_MAX) {
+        throw std::runtime_error("Unsigned long too large for long");
+    } else {
+        return static_cast<long>(num);
     }
 }

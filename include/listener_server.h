@@ -10,7 +10,7 @@
 namespace https {
     class ListenerServer: public https::Server {
     public:
-        ListenerServer(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &htmlFilePath);
+        ListenerServer(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolderPath);
         void startWithListener(int threadPoolSize);
         void listenerHandleEvents(int *workerEpollFDs, int numWorkers);
         void workerHandleConnections(int epollFD);
