@@ -189,7 +189,7 @@ void https::ListenerServer::workerProcessHTTPS(epoll_event event) {
 void https::ListenerServer::workerProcessHTTP(epoll_event event) {
     //Get connection struct from epoll event
     auto *connection = (https::Connection *) event.data.ptr;
-    std::cout << "Received HTTP Connection: " << event.data.ptr << " | "<< connection->state << " | "<< event.events << std::endl;
+    //std::cout << "Received HTTP Connection: " << event.data.ptr << " | "<< connection->state << " | "<< event.events << std::endl;
 
     if ((event.events & EPOLLERR) || (event.events & EPOLLHUP)) {
         connection->end();

@@ -15,7 +15,7 @@
 #include "connection.h"
 
 namespace https {
-    constexpr size_t kBufferSize = 2048;
+    static constexpr size_t kBufferSize = 2048;
 
     class Server {
     protected:

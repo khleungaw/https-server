@@ -18,10 +18,6 @@ int main(int argc, char *argv[]) {
     bool useListener = std::stoi(argv[7], nullptr, 10);
     char *domain = argv[8];
 
-    //Initialize variables
-    std::string rootPath = std::getenv( "ROOT" ) ? getenv( "ROOT" ) : "../";
-    std::string htmlFilePath = rootPath + "public/index.html";
-
     //Initialize OpenSSL
     SSL_library_init();
 

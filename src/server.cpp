@@ -178,22 +178,7 @@ void https::Server::loadFiles(const std::string &path) {
                 key += std::filesystem::relative(file.path(), publicFolder);
             files[key] = std::make_shared<File>();
             files[key]->size = file.file_size();
-
-            //Assign extension
-            if (file.path().extension() == ".html") {
-                files[key]->extension = "text/html";
-            } else if (file.path().extension() == ".css") {
-                files[key]->extension = "text/css";
-            } else if (file.path().extension() == ".js") {
-                files[key]->extension = "application/javascript";
-            } else if (file.path().extension() == ".png") {
-                files[key]->extension = "image/png";
-            } else if (file.path().extension() == ".jpg") {
-                files[key]->extension = "image/jpeg";
-            } else if (file.path().extension() == ".ico") {
-                files[key]->extension = "image/x-icon";
-            }
-
+            files[key]->extension = https::contentTypeDict.get(file.path().extension().c_str());
 
             //Copy file content
             files[key]->data = new char[files[key]->size];
