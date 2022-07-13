@@ -47,10 +47,11 @@ namespace https {
         File() = default;
     };
 
-    char* generateHeader(const std::shared_ptr<File> &file);
+    std::unique_ptr<char[]> generateHeader(const std::shared_ptr<File> &file);
     std::string generateRedirect(const std::string& domain, int httpsPort);
     int unsignedLongToInt(size_t num);
-    long unsignedLongToLong(size_t num);
+
+    [[maybe_unused]] long unsignedLongToLong(size_t num);
 }
 
 #endif //HTTPS_SERVER_MESSAGE_H

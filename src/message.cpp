@@ -8,18 +8,18 @@
 #include <cstring>
 #include "message.h"
 
-char* https::generateHeader(const std::shared_ptr<File> &file) {
+std::unique_ptr<char[]> https::generateHeader(const std::shared_ptr<File> &file) {
     //Size = 53 + extension length + file size length
     int headerSize = 53 + unsignedLongToInt(file->extension.length()) + unsignedLongToInt(std::to_string(file->size).length());
-    auto *header = new char[headerSize];
+    std::unique_ptr header = std::make_unique<char[]>(headerSize);
 
-    strcpy(header, "HTTP/1.1 200 OK\r\n");
-    strcat(header, "Content-Type: ");
-    strcat(header, file->extension.c_str());
-    strcat(header, "\r\n");
-    strcat(header, "Content-Length: ");
-    strcat(header, std::to_string(file->size).c_str());
-    strcat(header, "\r\n\r\n");
+    strcpy(header.get(), "HTTP/1.1 200 OK\r\n");
+    strcat(header.get(), "Content-Type: ");
+    strcat(header.get(), file->extension.c_str());
+    strcat(header.get(), "\r\n");
+    strcat(header.get(), "Content-Length: ");
+    strcat(header.get(), std::to_string(file->size).c_str());
+    strcat(header.get(), "\r\n\r\n");
 
     return header;
 }
@@ -43,7 +43,7 @@ int https::unsignedLongToInt(size_t num) {
     }
 }
 
-long https::unsignedLongToLong(size_t num) {
+[[maybe_unused]] long https::unsignedLongToLong(size_t num) {
     if (num > LLONG_MAX) {
         throw std::runtime_error("Unsigned long too large for long");
     } else {

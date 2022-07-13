@@ -61,6 +61,10 @@ namespace https {
             path.clear();
             version.clear();
         }
+
+        ~Connection() {
+            end();
+        }
     };
 }
 

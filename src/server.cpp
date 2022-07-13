@@ -195,6 +195,10 @@ void https::Server::loadFiles(const std::string &path) {
 }
 
 void https::Server::start(int threadPoolSize) {
+    if (threadPoolSize < 1) {
+        throw std::runtime_error("Thread Pool Size must be greater than 0");
+    }
+
     //Create worker threads
     for (int i = 0; i < threadPoolSize-1; i++) {
         std::thread worker(&https::Server::handleEvents, this);
@@ -346,9 +350,9 @@ void https::Server::processHTTP(epoll_event event) const {
         std::string res = https::generateRedirect(serverDomain, httpsSocket->port);
         //std::cout << "HTTP Response: \n" << res << std::endl;
         size_t resSize = res.length();
-        char *resBuffer = new char[resSize];
-        strcpy(resBuffer, res.c_str());
-        ssize_t writeResult = write(connection->fd, resBuffer, resSize);
+        std::unique_ptr<char[]> resBuffer = std::make_unique<char[]>(resSize);
+        strcpy(resBuffer.get(), res.c_str());
+        ssize_t writeResult = write(connection->fd, resBuffer.get(), resSize);
         //std::cout << "Wrote: " << writeResult << std::endl;
         if (writeResult <= 0) {
             switch (errno) {
@@ -569,7 +573,7 @@ void https::Server::sslRead(https::Connection **connPtr) const {
 void https::Server::sslWrite(https::Connection **connPtr) {
     auto *connection = *connPtr;
     //Initialise response
-    char *buffer;
+    std::unique_ptr<char[]> buffer;
     int bufferSize;
 
     //Only handle GET requests, reject the rest
@@ -578,26 +582,26 @@ void https::Server::sslWrite(https::Connection **connPtr) {
         if (files.count(connection->path) == 0) {
             //Generate 404 response
             bufferSize = 26;
-            buffer = new char[bufferSize];
-            strcpy(buffer, "HTTP/1.1 404 Not Found\r\n");
+            buffer = std::make_unique<char[]>(bufferSize);
+            strcpy(buffer.get(), "HTTP/1.1 404 Not Found\r\n");
         } else {
-            char *header = https::generateHeader(files[connection->path]);
-            bufferSize = unsignedLongToInt(strlen(header))+unsignedLongToInt(files[connection->path]->size);
-            buffer = new char[bufferSize];
-            strcpy(buffer, header);
-            memcpy(&buffer[strlen(header)], files[connection->path]->data, files[connection->path]->size);
+            std::unique_ptr<char[]> header = https::generateHeader(files[connection->path]);
+            bufferSize = unsignedLongToInt(strlen(header.get()))+unsignedLongToInt(files[connection->path]->size);
+            buffer = std::make_unique<char[]>(bufferSize);
+            strcpy(buffer.get(), header.get());
+            memcpy(&buffer[strlen(header.get())], files[connection->path]->data, files[connection->path]->size);
         }
     } else {
         bufferSize = 35;
-        buffer = new char[bufferSize];
-        strcpy(buffer, "HTTP/1.1 405 Method Not Allowed\r\n");
+        buffer = std::make_unique<char[]>(bufferSize);
+        strcpy(buffer.get(), "HTTP/1.1 405 Method Not Allowed\r\n");
     }
 
     //std::cout << std::this_thread::get_id() << ": Writing Connection: " << connection << " | " << connection->method << " | " << connection->path << std::endl;
     //std::cout << std::this_thread::get_id() << ": Response: " << buffer << std::endl;
 
     //Write until EOF
-    int writeResult = SSL_write(connection->ssl, buffer, bufferSize);
+    int writeResult = SSL_write(connection->ssl, buffer.get(), bufferSize);
     if (writeResult <= 0) {
         int error = SSL_get_error(connection->ssl, writeResult);
         switch (error) {
@@ -627,8 +631,6 @@ void https::Server::sslWrite(https::Connection **connPtr) {
         connection->clearReq(); //Clear request
         rearmConnection(&connection, EPOLLIN);
     }
-
-    delete[] buffer;
 }
 
 void https::Server::rearmConnection(https::Connection **connPtr, int events) const {

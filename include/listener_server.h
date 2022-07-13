@@ -8,10 +8,10 @@
 #include "server.h"
 
 namespace https {
-    class ListenerServer: public https::Server {
+    class [[maybe_unused]] ListenerServer: public https::Server {
     public:
-        ListenerServer(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolderPath);
-        void startWithListener(int threadPoolSize);
+        [[maybe_unused]] ListenerServer(char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolderPath);
+        [[maybe_unused]] void startWithListener(int threadPoolSize);
         void listenerHandleEvents(int *workerEpollFDs, int numWorkers);
         void workerHandleConnections(int epollFD);
         void listenerProcessSockets(int socketFD, int epollFD);

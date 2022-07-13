@@ -17,12 +17,12 @@
 #include "message.h"
 #include "listener_server.h"
 
-https::ListenerServer::ListenerServer
+[[maybe_unused]] https::ListenerServer::ListenerServer
     (char *certFile, char *keyFile, std::string domain, int httpsPort, int httpPort, const std::string &publicFolderPath) :
     Server(certFile, keyFile, std::move(domain), httpsPort, httpPort, publicFolderPath) {
 }
 
-void https::ListenerServer::startWithListener(int threadPoolSize) {
+[[maybe_unused]] void https::ListenerServer::startWithListener(int threadPoolSize) {
     //Change socket epolls to without EPOLLONESHOT
     struct epoll_event epollEvent{};
     epollEvent.events = EPOLLIN;
@@ -338,11 +338,11 @@ void https::ListenerServer::workerSSLWrite(https::Connection **connPtr) {
             buffer = new char[bufferSize];
             strcpy(buffer, "HTTP/1.1 404 Not Found\r\n");
         } else {
-            char *header = https::generateHeader(files[connection->path]);
-            bufferSize = unsignedLongToInt(strlen(header))+unsignedLongToInt(files[connection->path]->size);
+            std::unique_ptr<char[]> header = https::generateHeader(files[connection->path]);
+            bufferSize = unsignedLongToInt(strlen(header.get()))+unsignedLongToInt(files[connection->path]->size);
             buffer = new char[bufferSize];
-            strcpy(buffer, header);
-            memcpy(&buffer[strlen(header)], files[connection->path]->data, files[connection->path]->size);
+            strcpy(buffer, header.get());
+            memcpy(&buffer[strlen(header.get())], files[connection->path]->data, files[connection->path]->size);
         }
     } else {
         bufferSize = 35;
